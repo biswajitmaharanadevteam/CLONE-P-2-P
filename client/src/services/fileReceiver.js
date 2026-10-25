@@ -11,7 +11,12 @@ export class FileReceiver {
     this.manifest = null;
     this.currentFileIndex = -1;
     this.currentFileMeta = null;
-    this.currentChunks = [];
+    
+    // Sub-blob chunking prevents JS heap exhaustion on huge files (e.g. 1.6GB+)
+    this.currentBlobs = [];
+    this.pendingChunks = [];
+    this.pendingBytes = 0;
+
     this.receivedBytesCurrentFile = 0;
     this.totalReceivedBytes = 0;
     this.completedFiles = [];
@@ -30,6 +35,7 @@ export class FileReceiver {
 
         switch (msg.type) {
           case 'MANIFEST':
+            console.log('[FileReceiver] Received MANIFEST:', msg);
             this.manifest = msg;
             this.totalReceivedBytes = 0;
             this.completedFiles = [];
@@ -40,18 +46,23 @@ export class FileReceiver {
             break;
 
           case 'FILE_START':
+            console.log('[FileReceiver] Starting file:', msg.name, msg.size);
             this.currentFileIndex = msg.index;
             this.currentFileMeta = msg;
-            this.currentChunks = [];
+            this.currentBlobs = [];
+            this.pendingChunks = [];
+            this.pendingBytes = 0;
             this.receivedBytesCurrentFile = 0;
             if (this.onFileStart) this.onFileStart(msg);
             break;
 
           case 'FILE_END':
+            console.log('[FileReceiver] Completed file receiving:', this.currentFileMeta?.name);
             this.finishCurrentFile();
             break;
 
           case 'ALL_COMPLETE':
+            console.log('[FileReceiver] All files transfer complete');
             if (this.onAllComplete) this.onAllComplete(this.completedFiles);
             break;
 
@@ -67,9 +78,17 @@ export class FileReceiver {
 
       // 2. Binary Chunk (ArrayBuffer)
       if (data instanceof ArrayBuffer) {
-        this.currentChunks.push(data);
+        this.pendingChunks.push(data);
+        this.pendingBytes += data.byteLength;
         this.receivedBytesCurrentFile += data.byteLength;
         this.totalReceivedBytes += data.byteLength;
+
+        // Pack every 8MB of ArrayBuffers into a Blob to keep JS heap light
+        if (this.pendingBytes >= 8 * 1024 * 1024) {
+          this.currentBlobs.push(new Blob(this.pendingChunks));
+          this.pendingChunks = [];
+          this.pendingBytes = 0;
+        }
 
         this.calculateMetrics();
       }
@@ -82,16 +101,22 @@ export class FileReceiver {
   finishCurrentFile() {
     if (!this.currentFileMeta) return;
 
-    // Build Blob from received chunks
+    // Flush any remaining pending chunks into final blob
+    if (this.pendingChunks.length > 0) {
+      this.currentBlobs.push(new Blob(this.pendingChunks));
+      this.pendingChunks = [];
+      this.pendingBytes = 0;
+    }
+
     const mime = this.currentFileMeta.mimeType || 'application/octet-stream';
-    const blob = new Blob(this.currentChunks, { type: mime });
-    const url = URL.createObjectURL(blob);
+    const finalBlob = new Blob(this.currentBlobs, { type: mime });
+    const url = URL.createObjectURL(finalBlob);
 
     const completed = {
       name: this.currentFileMeta.name,
       size: this.currentFileMeta.size,
       mimeType: mime,
-      blob,
+      blob: finalBlob,
       url
     };
 
@@ -105,7 +130,7 @@ export class FileReceiver {
     }
 
     // Clean up memory buffer for current file
-    this.currentChunks = [];
+    this.currentBlobs = [];
     this.currentFileMeta = null;
   }
 
@@ -118,7 +143,7 @@ export class FileReceiver {
       a.click();
       document.body.removeChild(a);
     } catch (err) {
-      console.warn('Auto download failed, user can use download button', err);
+      console.warn('Auto download blocked by browser, user can use Save button', err);
     }
   }
 
@@ -126,7 +151,7 @@ export class FileReceiver {
     const now = performance.now();
     const deltaMs = now - this.lastUpdateTime;
 
-    if (deltaMs >= 250) {
+    if (deltaMs >= 250 || (this.manifest && this.totalReceivedBytes >= this.manifest.totalBytes)) {
       const bytesInInterval = this.totalReceivedBytes - this.lastReceivedBytes;
       const intervalSec = deltaMs / 1000;
       this.currentSpeed = intervalSec > 0 ? bytesInInterval / intervalSec : 0;

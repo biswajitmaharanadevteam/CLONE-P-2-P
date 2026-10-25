@@ -39,7 +39,8 @@ export default function App() {
   const [completedDownloads, setCompletedDownloads] = useState([]);
   const [receiverError, setReceiverError] = useState('');
 
-  // Refs for services & signal buffering
+  // Refs for services & closure-safe file references
+  const filesRef = useRef([]);
   const signalingRef = useRef(null);
   const webrtcRef = useRef(null);
   const streamerRef = useRef(null);
@@ -48,7 +49,6 @@ export default function App() {
 
   // 1. Check URL parameters on mount & Ping Render wake-up
   useEffect(() => {
-    // Wake up Render if sleeping
     wakeUpSignalingServer();
 
     const params = new URLSearchParams(window.location.search);
@@ -85,6 +85,10 @@ export default function App() {
 
   // ===================== SENDER FLOW =====================
   const handleFilesSelected = async (files) => {
+    if (!files || files.length === 0) return;
+
+    // Store in Ref immediately to prevent stale React closures!
+    filesRef.current = files;
     setSelectedFiles(files);
     setViewMode('SENDER_ACTIVE');
     setSenderTransferState('WAITING_PEER');
@@ -96,6 +100,8 @@ export default function App() {
       sampleName: files[0]?.name
     };
 
+    console.log('[Sender] Files selected:', files.length, 'Total size:', totalBytes);
+
     // Initialize Signaling Client
     signalingRef.current = new SignalingClient({
       onRoomCreated: (code) => {
@@ -105,7 +111,7 @@ export default function App() {
       },
 
       onPeerJoined: async () => {
-        console.log('[Sender] Receiver joined room, initiating WebRTC offer...');
+        console.log('[Sender] Peer joined, initiating WebRTC offer...');
         setSenderTransferState('CONNECTING');
         await initSenderWebRTC();
       },
@@ -136,6 +142,7 @@ export default function App() {
         signalingRef.current?.sendSignal(data);
       },
       onChannelOpen: () => {
+        console.log('[Sender] DataChannel is OPEN. Starting stream...');
         setSenderTransferState('TRANSFERRING');
         startFileStreaming();
       },
@@ -156,13 +163,24 @@ export default function App() {
   };
 
   const startFileStreaming = () => {
+    // ALWAYS read from filesRef to guarantee fresh reference
+    const filesToStream = filesRef.current && filesRef.current.length > 0 ? filesRef.current : selectedFiles;
+
+    if (!filesToStream || filesToStream.length === 0) {
+      console.error('[Sender] Cannot start stream: files list is empty!');
+      return;
+    }
+
+    console.log('[Sender] Streaming files:', filesToStream.map(f => `${f.name} (${f.size} bytes)`));
+
     streamerRef.current = new FileStreamer(
       webrtcRef.current,
-      selectedFiles,
+      filesToStream,
       (progress) => {
         setTransferMetrics(progress);
       },
       () => {
+        console.log('[Sender] File transfer finished successfully!');
         setSenderTransferState('COMPLETED');
         confetti({
           particleCount: 100,
@@ -186,6 +204,7 @@ export default function App() {
 
   const handleSenderReset = () => {
     cleanup();
+    filesRef.current = [];
     setSelectedFiles([]);
     setRoomId(null);
     setShareUrl('');
@@ -205,9 +224,10 @@ export default function App() {
     setReceiverConnectionState('CONNECTING');
     signalQueueRef.current = [];
 
-    // 1. Create Receiver parser immediately
+    // 1. Create Receiver parser
     receiverRef.current = new FileReceiver({
       onManifest: (manifest) => {
+        console.log('[Receiver] Setting manifest in state:', manifest);
         setIncomingManifest(manifest);
         setReceiverConnectionState('DOWNLOADING');
       },
@@ -218,9 +238,11 @@ export default function App() {
         setTransferMetrics(metrics);
       },
       onFileReady: (completedFile) => {
+        console.log('[Receiver] File ready:', completedFile.name);
         setCompletedDownloads((prev) => [...prev, completedFile]);
       },
       onAllComplete: () => {
+        console.log('[Receiver] All files completed!');
         setReceiverConnectionState('COMPLETED');
         confetti({
           particleCount: 120,
@@ -238,7 +260,7 @@ export default function App() {
       }
     });
 
-    // 2. Initialize WebRTC receiver instance BEFORE signaling connect so it's ready to handle the Offer
+    // 2. Pre-initialize WebRTC connection so it is ready before signals arrive
     await initReceiverWebRTC();
 
     // 3. Create Signaling Client
@@ -257,7 +279,6 @@ export default function App() {
         if (webrtcRef.current && webrtcRef.current.isReady) {
           await webrtcRef.current.handleSignal(signalData);
         } else {
-          // Buffer signal if WebRTC is still initializing
           signalQueueRef.current.push(signalData);
         }
       },
@@ -286,7 +307,7 @@ export default function App() {
         signalingRef.current?.sendSignal(data);
       },
       onChannelOpen: () => {
-        console.log('[Receiver] WebRTC DataChannel established!');
+        console.log('[Receiver] DataChannel connected and opened!');
         setReceiverConnectionState('DOWNLOADING');
       },
       onDataReceived: (chunk) => {
@@ -312,7 +333,7 @@ export default function App() {
 
     await webrtcRef.current.init();
 
-    // Drain any buffered signals
+    // Drain queued signals if any arrived while initializing
     while (signalQueueRef.current.length > 0) {
       const sig = signalQueueRef.current.shift();
       await webrtcRef.current.handleSignal(sig);

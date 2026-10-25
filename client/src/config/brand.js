@@ -8,11 +8,11 @@ export const APP_CONFIG = {
   tagline: 'Direct, private peer-to-peer file sharing without size limits.',
   subtext: 'No cloud storage. No file size restrictions. Encrypted straight from device to device.',
   
-  // Networking defaults
-  defaultChunkSize: 64 * 1024, // 64 KB binary chunks for high throughput
-  bufferedThreshold: 512 * 1024, // 512 KB backpressure buffer limit
+  // Safe chunk size for 100% browser compatibility (desktop, Android, iOS Safari)
+  defaultChunkSize: 32 * 1024, // 32 KB binary chunks to prevent SCTP header overflow
+  bufferedThreshold: 512 * 1024, // 512 KB backpressure threshold
   
-  // High-reliability STUN + TURN Relay servers (Ensures connection across 4G/5G, firewalls, and NAT)
+  // High-reliability STUN + TURN Relay servers (Cross-network NAT traversal)
   defaultIceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
