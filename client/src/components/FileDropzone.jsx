@@ -1,10 +1,11 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, FolderUp, File, X, ArrowRight, ShieldCheck, HardDrive } from 'lucide-react';
+import { UploadCloud, FolderUp, File, X, ArrowRight, ShieldCheck, HardDrive, KeyRound } from 'lucide-react';
 import { formatBytes, getFileCategory } from '../utils/formatters';
 
-export default function FileDropzone({ onFilesSelected }) {
+export default function FileDropzone({ onFilesSelected, onJoinRoom }) {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
+  const [manualCode, setManualCode] = useState('');
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
 
@@ -58,8 +59,15 @@ export default function FileDropzone({ onFilesSelected }) {
     }
   };
 
+  const handleJoinSubmit = (e) => {
+    e.preventDefault();
+    if (manualCode.trim()) {
+      onJoinRoom(manualCode.trim());
+    }
+  };
+
   return (
-    <div className="w-full max-w-2xl mx-auto">
+    <div className="w-full max-w-2xl mx-auto space-y-6">
       {/* Dropzone Container */}
       <div
         onDragEnter={handleDrag}
@@ -182,8 +190,35 @@ export default function FileDropzone({ onFilesSelected }) {
         )}
       </div>
 
+      {/* Manual Room Code Input Card */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-slate-900/40 border border-slate-800/80 backdrop-blur-sm">
+        <form onSubmit={handleJoinSubmit} className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 text-slate-300 text-xs sm:text-sm font-medium w-full sm:w-auto">
+            <KeyRound className="w-4 h-4 text-cyan-400 shrink-0" />
+            <span>Have a Room Code?</span>
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <input
+              type="text"
+              placeholder="e.g. 7X9K2P"
+              value={manualCode}
+              onChange={(e) => setManualCode(e.target.value.toUpperCase())}
+              maxLength={8}
+              className="w-full sm:w-36 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-center tracking-widest text-cyan-400 outline-none focus:border-cyan-500"
+            />
+            <button
+              type="submit"
+              disabled={!manualCode.trim()}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-slate-200 text-xs font-bold transition disabled:opacity-40 disabled:pointer-events-none cursor-pointer"
+            >
+              Receive
+            </button>
+          </div>
+        </form>
+      </div>
+
       {/* Feature Micro-Badges */}
-      <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
         <div className="p-4 rounded-2xl bg-slate-900/30 border border-slate-800/60">
           <HardDrive className="w-5 h-5 text-cyan-400 mx-auto mb-2" />
           <h4 className="text-sm font-semibold text-slate-200">No Size Limits</h4>

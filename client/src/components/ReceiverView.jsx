@@ -8,7 +8,8 @@ import {
   AlertCircle,
   File,
   CheckCircle2,
-  Download
+  Download,
+  Sparkles
 } from 'lucide-react';
 import { formatBytes, formatSpeed, formatTimeRemaining, getFileCategory } from '../utils/formatters';
 
@@ -31,16 +32,16 @@ export default function ReceiverView({
             {connectionState === 'COMPLETED' ? (
               <CheckCircle2 className="w-8 h-8 text-emerald-400" />
             ) : (
-              <DownloadCloud className="w-8 h-8" />
+              <DownloadCloud className="w-8 h-8 animate-pulse" />
             )}
           </div>
 
           <h2 className="text-2xl font-bold text-white">
             {connectionState === 'COMPLETED'
-              ? 'Download Complete!'
+              ? 'Transfer Finished!'
               : connectionState === 'DOWNLOADING'
-              ? 'Receiving Files...'
-              : 'Incoming Direct P2P File Transfer'}
+              ? 'Receiving Direct Stream...'
+              : 'Connecting to Sender...'}
           </h2>
 
           <p className="text-xs text-slate-400 mt-1">
@@ -51,7 +52,7 @@ export default function ReceiverView({
         {/* Error State */}
         {connectionState === 'ERROR' && (
           <div className="my-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 shrink-0" />
+            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
             <div>
               <p className="font-semibold text-sm">Connection Failed</p>
               <p className="mt-1 text-slate-400">{errorMessage || 'The sender may have closed the transfer room or went offline.'}</p>
@@ -59,7 +60,7 @@ export default function ReceiverView({
                 onClick={() => window.location.href = '/'}
                 className="mt-3 px-4 py-1.5 rounded-lg bg-slate-800 text-white font-medium hover:bg-slate-700 transition"
               >
-                Go to Home
+                Return to Home
               </button>
             </div>
           </div>
@@ -100,7 +101,7 @@ export default function ReceiverView({
                     {isDownloaded && (
                       <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md shrink-0">
                         <CheckCircle2 className="w-3 h-3" />
-                        Saved
+                        Received
                       </span>
                     )}
                   </div>
@@ -116,7 +117,7 @@ export default function ReceiverView({
             <div className="space-y-2">
               <div className="flex justify-between text-xs">
                 <span className="text-slate-400 font-medium truncate pr-2">
-                  {metrics.fileName ? `Saving: ${metrics.fileName}` : 'Receiving Stream...'}
+                  {metrics.fileName ? `Streaming: ${metrics.fileName}` : 'Receiving Stream...'}
                 </span>
                 <span className="font-mono font-bold text-cyan-400">
                   {Math.round(metrics.percentage || 0)}%
@@ -164,29 +165,33 @@ export default function ReceiverView({
           </div>
         )}
 
-        {/* Completed Downloads List */}
+        {/* Ready to Save / Downloaded Files List */}
         {completedFiles && completedFiles.length > 0 && (
-          <div className="my-6 space-y-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Downloaded Files
-            </h4>
+          <div className="my-6 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-emerald-400">
+              <Sparkles className="w-4 h-4" />
+              <span>Ready for Download ({completedFiles.length})</span>
+            </div>
             <div className="space-y-2">
               {completedFiles.map((file, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center justify-between p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-xs"
+                  className="flex items-center justify-between p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-xs shadow-lg shadow-emerald-950/20"
                 >
-                  <div className="flex items-center gap-2 min-w-0 pr-2">
-                    <FileCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span className="font-medium text-slate-200 truncate">{file.name}</span>
+                  <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                    <FileCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-slate-100 truncate">{file.name}</p>
+                      <p className="text-[10px] text-emerald-300 font-mono">{formatBytes(file.size)}</p>
+                    </div>
                   </div>
                   <a
                     href={file.url}
                     download={file.name}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition shrink-0"
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition shadow-md shadow-emerald-500/20 shrink-0 cursor-pointer"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download</span>
+                    <Download className="w-4 h-4" />
+                    <span>Save File</span>
                   </a>
                 </div>
               ))}
@@ -196,28 +201,23 @@ export default function ReceiverView({
 
         {/* Action Button */}
         <div className="mt-6 pt-4 border-t border-slate-800">
-          {connectionState === 'WAITING_ACCEPT' && (
-            <button
-              onClick={onAcceptTransfer}
-              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-sm shadow-xl shadow-cyan-500/25 transition cursor-pointer"
-            >
-              <DownloadCloud className="w-5 h-5" />
-              <span>Start Direct P2P Download</span>
-            </button>
-          )}
-
           {connectionState === 'CONNECTING' && (
-            <div className="text-center py-2 text-xs font-medium text-cyan-400 animate-pulse">
-              Connecting to sender's device...
+            <div className="text-center py-2 space-y-1">
+              <div className="text-xs font-medium text-cyan-400 animate-pulse">
+                Connecting direct peer-to-peer tunnel...
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Please keep both devices online. Handshake in progress.
+              </p>
             </div>
           )}
 
           {connectionState === 'COMPLETED' && (
             <button
               onClick={() => window.location.href = '/'}
-              className="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition cursor-pointer"
+              className="w-full py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition cursor-pointer"
             >
-              Transfer Complete — Send Your Own Files
+              Transfer Complete — Share Your Own Files
             </button>
           )}
         </div>

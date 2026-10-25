@@ -10,6 +10,7 @@ import { SignalingClient } from './services/signaling';
 import { WebRTCConnection } from './services/webrtc';
 import { FileStreamer } from './services/fileStreamer';
 import { FileReceiver } from './services/fileReceiver';
+import { getSignalingUrl } from './config/brand';
 
 export default function App() {
   // App View State: 'SENDER_IDLE' | 'SENDER_ACTIVE' | 'RECEIVER'
@@ -38,21 +39,26 @@ export default function App() {
   const [completedDownloads, setCompletedDownloads] = useState([]);
   const [receiverError, setReceiverError] = useState('');
 
-  // Refs for services
+  // Refs for services & signal buffering
   const signalingRef = useRef(null);
   const webrtcRef = useRef(null);
   const streamerRef = useRef(null);
   const receiverRef = useRef(null);
+  const signalQueueRef = useRef([]);
 
-  // 1. Check URL parameters on mount
+  // 1. Check URL parameters on mount & Ping Render wake-up
   useEffect(() => {
+    // Wake up Render if sleeping
+    wakeUpSignalingServer();
+
     const params = new URLSearchParams(window.location.search);
     const roomParam = params.get('room');
 
     if (roomParam) {
+      const code = roomParam.trim().toUpperCase();
       setViewMode('RECEIVER');
-      setRoomId(roomParam.toUpperCase());
-      initReceiver(roomParam.toUpperCase());
+      setRoomId(code);
+      initReceiver(code);
     }
 
     return () => {
@@ -60,10 +66,21 @@ export default function App() {
     };
   }, []);
 
+  const wakeUpSignalingServer = () => {
+    try {
+      const wsUrl = getSignalingUrl();
+      const httpUrl = wsUrl.replace(/^ws/, 'http');
+      fetch(`${httpUrl}/health`, { mode: 'cors' }).catch(() => {});
+    } catch (e) {
+      // Ignore background wake-up errors
+    }
+  };
+
   const cleanup = () => {
     if (streamerRef.current) streamerRef.current.cancel();
     if (webrtcRef.current) webrtcRef.current.close();
     if (signalingRef.current) signalingRef.current.disconnect();
+    signalQueueRef.current = [];
   };
 
   // ===================== SENDER FLOW =====================
@@ -88,9 +105,9 @@ export default function App() {
       },
 
       onPeerJoined: async () => {
+        console.log('[Sender] Receiver joined room, initiating WebRTC offer...');
         setSenderTransferState('CONNECTING');
-        // Initialize WebRTC as initiator
-        initSenderWebRTC();
+        await initSenderWebRTC();
       },
 
       onSignal: (signalData) => {
@@ -186,8 +203,9 @@ export default function App() {
   // ===================== RECEIVER FLOW =====================
   const initReceiver = async (targetRoomId) => {
     setReceiverConnectionState('CONNECTING');
+    signalQueueRef.current = [];
 
-    // Create Receiver parser
+    // 1. Create Receiver parser immediately
     receiverRef.current = new FileReceiver({
       onManifest: (manifest) => {
         setIncomingManifest(manifest);
@@ -220,27 +238,33 @@ export default function App() {
       }
     });
 
-    // Create Signaling Client
+    // 2. Initialize WebRTC receiver instance BEFORE signaling connect so it's ready to handle the Offer
+    await initReceiverWebRTC();
+
+    // 3. Create Signaling Client
     signalingRef.current = new SignalingClient({
-      onRoomJoined: async (code, fileMeta) => {
+      onRoomJoined: (code, fileMeta) => {
+        console.log('[Receiver] Room joined:', code);
         if (fileMeta) {
           setIncomingManifest({
             totalFiles: fileMeta.totalFiles,
             totalBytes: fileMeta.totalBytes
           });
         }
-        initReceiverWebRTC();
       },
 
-      onSignal: (signalData) => {
-        if (webrtcRef.current) {
-          webrtcRef.current.handleSignal(signalData);
+      onSignal: async (signalData) => {
+        if (webrtcRef.current && webrtcRef.current.isReady) {
+          await webrtcRef.current.handleSignal(signalData);
+        } else {
+          // Buffer signal if WebRTC is still initializing
+          signalQueueRef.current.push(signalData);
         }
       },
 
       onPeerDisconnected: () => {
         if (receiverConnectionState !== 'COMPLETED') {
-          setReceiverError('Sender closed their browser tab.');
+          setReceiverError('Sender disconnected.');
           setReceiverConnectionState('ERROR');
         }
       },
@@ -262,6 +286,7 @@ export default function App() {
         signalingRef.current?.sendSignal(data);
       },
       onChannelOpen: () => {
+        console.log('[Receiver] WebRTC DataChannel established!');
         setReceiverConnectionState('DOWNLOADING');
       },
       onDataReceived: (chunk) => {
@@ -278,7 +303,7 @@ export default function App() {
       onStatusChange: (status) => {
         if (status === 'failed' || status === 'disconnected') {
           if (receiverConnectionState !== 'COMPLETED') {
-            setReceiverError('Connection dropped.');
+            setReceiverError('Direct connection could not be established.');
             setReceiverConnectionState('ERROR');
           }
         }
@@ -286,6 +311,21 @@ export default function App() {
     });
 
     await webrtcRef.current.init();
+
+    // Drain any buffered signals
+    while (signalQueueRef.current.length > 0) {
+      const sig = signalQueueRef.current.shift();
+      await webrtcRef.current.handleSignal(sig);
+    }
+  };
+
+  const handleManualJoin = (code) => {
+    const cleanCode = code.trim().toUpperCase();
+    if (cleanCode.length >= 4) {
+      setViewMode('RECEIVER');
+      setRoomId(cleanCode);
+      initReceiver(cleanCode);
+    }
   };
 
   return (
@@ -301,7 +341,10 @@ export default function App() {
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-8 sm:py-14 flex flex-col items-center justify-center">
         {/* SENDER: Idle Dropzone View */}
         {viewMode === 'SENDER_IDLE' && (
-          <FileDropzone onFilesSelected={handleFilesSelected} />
+          <FileDropzone
+            onFilesSelected={handleFilesSelected}
+            onJoinRoom={handleManualJoin}
+          />
         )}
 
         {/* SENDER: Active Transfer Dashboard */}

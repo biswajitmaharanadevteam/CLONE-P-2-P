@@ -10,14 +10,24 @@ export const APP_CONFIG = {
   
   // Networking defaults
   defaultChunkSize: 64 * 1024, // 64 KB binary chunks for high throughput
-  bufferedThreshold: 1024 * 1024, // 1 MB backpressure buffer limit
+  bufferedThreshold: 512 * 1024, // 512 KB backpressure buffer limit
   
-  // Fallback public STUN servers
+  // High-reliability STUN + TURN Relay servers (Ensures connection across 4G/5G, firewalls, and NAT)
   defaultIceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun.cloudflare.com:3478' }
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:80?transport=tcp',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp'
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
   ]
 };
 
@@ -27,7 +37,6 @@ export function getSignalingUrl() {
   }
   
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  // In development Vite proxy routes /ws to localhost:4000
   if (import.meta.env.DEV) {
     return `ws://${window.location.hostname}:4000`;
   }
